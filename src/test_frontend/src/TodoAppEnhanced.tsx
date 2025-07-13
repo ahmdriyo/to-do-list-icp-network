@@ -450,13 +450,8 @@ const TodoAppEnhanced: React.FC = () => {
                 '➕ Tambah Tugas'
               )}
             </button>
-            
-            <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
-              💡 Tips: Tekan Ctrl + Enter untuk menambah tugas
-            </p>
           </div>
         </div>
-
         {/* Task List */}
         <div className="space-y-4">
           {tasks.length === 0 ? (
