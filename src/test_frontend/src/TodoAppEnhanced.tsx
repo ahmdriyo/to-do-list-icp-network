@@ -447,7 +447,7 @@ const TodoAppEnhanced: React.FC = () => {
                   Menambahkan...
                 </>
               ) : (
-                '➕ Tambah Tugas'
+                'Tambah Tugas'
               )}
             </button>
           </div>
