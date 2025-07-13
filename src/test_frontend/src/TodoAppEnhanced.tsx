@@ -1,8 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { test_backend } from '../../declarations/test_backend';
 import { useAuth } from './contexts/AuthContext';
 import { useTheme } from './contexts/ThemeContext';
-import CommentSection from './components/CommentSection';
 import {
   Task,
   TaskInput,
@@ -14,7 +12,7 @@ import {
 
 const TodoAppEnhanced: React.FC = () => {
   // Context hooks
-  const { isAuthenticated, principal, logout } = useAuth();
+  const { isAuthenticated, principal, logout, backendActor } = useAuth();
   const { isDarkMode, toggleDarkMode } = useTheme();
 
   // State management
@@ -28,34 +26,36 @@ const TodoAppEnhanced: React.FC = () => {
     loading: true,
     toggling: new Set(),
     deleting: new Set(),
-    commenting: new Set(),
-    addingComment: new Set(),
   });
 
   // Load tasks ketika component mount atau authentication berubah
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated && backendActor) {
       loadTasks();
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, backendActor]);
 
   /**
    * Load semua tasks dari backend
    */
   const loadTasks = async (): Promise<void> => {
+    if (!backendActor) {
+      console.error('Backend actor not available');
+      return;
+    }
+
     try {
       setLoadingStates(prev => ({ ...prev, loading: true }));
-      const backendTasks = await test_backend.getTasks();
+      const backendTasks = await backendActor.getTasks();
       
       // Convert backend tasks ke format yang digunakan frontend
-      const formattedTasks: Task[] = backendTasks.map(task => ({
+      const formattedTasks: Task[] = backendTasks.map((task: any) => ({
         id: task.id,
         title: task.title,
         description: task.description,
         completed: task.completed,
         createdAt: task.createdAt,
-        owner: '', // Backend asli tidak memiliki owner
-        comments: [], // Backend asli tidak memiliki comments
+        owner: task.owner.toString(), // Convert Principal to string
       }));
       
       setTasks(formattedTasks);
@@ -81,6 +81,11 @@ const TodoAppEnhanced: React.FC = () => {
    * Tambah task baru
    */
   const addTask = async (): Promise<void> => {
+    if (!backendActor) {
+      console.error('Backend actor not available');
+      return;
+    }
+
     const validationErrors = validateTaskInput(taskInput);
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
@@ -90,7 +95,7 @@ const TodoAppEnhanced: React.FC = () => {
     try {
       setLoadingStates(prev => ({ ...prev, adding: true }));
       
-      const taskId = await test_backend.addTask(
+      const taskId = await backendActor.addTask(
         taskInput.title.trim(),
         taskInput.description.trim()
       );
@@ -116,6 +121,11 @@ const TodoAppEnhanced: React.FC = () => {
    * Toggle status completed task
    */
   const toggleTaskComplete = async (id: bigint): Promise<void> => {
+    if (!backendActor) {
+      console.error('Backend actor not available');
+      return;
+    }
+
     const idString = id.toString();
     
     try {
@@ -124,7 +134,7 @@ const TodoAppEnhanced: React.FC = () => {
         toggling: new Set([...prev.toggling, idString])
       }));
       
-      const success = await test_backend.toggleStatus(id);
+      const success = await backendActor.toggleStatus(id);
       
       if (success) {
         // Update local state
@@ -154,6 +164,11 @@ const TodoAppEnhanced: React.FC = () => {
    * Hapus task
    */
   const deleteTask = async (id: bigint): Promise<void> => {
+    if (!backendActor) {
+      console.error('Backend actor not available');
+      return;
+    }
+
     const idString = id.toString();
     
     try {
@@ -162,7 +177,7 @@ const TodoAppEnhanced: React.FC = () => {
         deleting: new Set([...prev.deleting, idString])
       }));
       
-      const success = await test_backend.deleteTask(id);
+      const success = await backendActor.deleteTask(id);
       
       if (success) {
         setTasks(prevTasks => prevTasks.filter(task => task.id !== id));
@@ -187,13 +202,18 @@ const TodoAppEnhanced: React.FC = () => {
    * Hapus semua task yang completed
    */
   const clearCompletedTasks = async (): Promise<void> => {
+    if (!backendActor) {
+      console.error('Backend actor not available');
+      return;
+    }
+
     const completedTasksCount = tasks.filter(task => task.completed).length;
     if (completedTasksCount === 0) return;
 
     const confirmDelete = window.confirm(`Hapus ${completedTasksCount} tugas yang sudah selesai?`);
     if (confirmDelete) {
       try {
-        const deletedCount = await test_backend.clearCompletedTasks();
+        const deletedCount = await backendActor.clearCompletedTasks();
         await loadTasks();
         showToastMessage(`${Number(deletedCount)} tugas selesai berhasil dihapus! ✨`);
       } catch (error) {
@@ -201,34 +221,6 @@ const TodoAppEnhanced: React.FC = () => {
         showToastMessage('Gagal menghapus tugas yang selesai! ❌');
       }
     }
-  };
-
-  /**
-   * Tambah comment ke task
-   */
-  const addComment = async (taskId: bigint, comment: string): Promise<boolean> => {
-    // Backend asli tidak memiliki fitur comment, jadi kita simulate dengan local state
-    console.log('Adding comment (simulated):', comment, 'to task:', taskId.toString());
-    
-    // Update local state
-    setTasks(prevTasks =>
-      prevTasks.map(task =>
-        task.id === taskId 
-          ? { ...task, comments: [...task.comments, comment] }
-          : task
-      )
-    );
-    showToastMessage('Komentar berhasil ditambahkan! 💬 (Simulasi)');
-    return true;
-  };
-
-  /**
-   * Load comments untuk task tertentu
-   */
-  const loadComments = async (taskId: bigint): Promise<string[]> => {
-    // Backend asli tidak memiliki fitur comment, return dari local state
-    const task = tasks.find(t => t.id === taskId);
-    return task?.comments || [];
   };
 
   /**
@@ -478,7 +470,6 @@ const TodoAppEnhanced: React.FC = () => {
               const taskIdString = task.id.toString();
               const isToggling = loadingStates.toggling.has(taskIdString);
               const isDeleting = loadingStates.deleting.has(taskIdString);
-              const isAddingComment = loadingStates.addingComment.has(taskIdString);
               
               return (
                 <div
@@ -532,15 +523,6 @@ const TodoAppEnhanced: React.FC = () => {
                           </p>
                         )}
                       </div>
-
-                      {/* Comment Section */}
-                      <CommentSection
-                        taskId={task.id}
-                        comments={task.comments}
-                        onAddComment={addComment}
-                        onLoadComments={loadComments}
-                        isAddingComment={isAddingComment}
-                      />
                     </div>
                     
                     {/* Delete Button */}

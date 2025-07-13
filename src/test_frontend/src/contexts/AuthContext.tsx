@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { AuthClient } from '@dfinity/auth-client';
 import { Identity } from '@dfinity/agent';
+import { createAuthenticatedBackend, clearBackendActor } from '../services/backendService';
+import type { _SERVICE } from '../../../declarations/test_backend/test_backend.did';
 
 // Interface untuk Auth Context
 interface AuthContextType {
@@ -8,6 +10,7 @@ interface AuthContextType {
   identity: Identity | null;
   principal: string | null;
   authClient: AuthClient | null;
+  backendActor: _SERVICE | null;
   login: () => Promise<void>;
   logout: () => Promise<void>;
   loading: boolean;
@@ -42,6 +45,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [principal, setPrincipal] = useState<string | null>(null);
   const [authClient, setAuthClient] = useState<AuthClient | null>(null);
+  const [backendActor, setBackendActor] = useState<_SERVICE | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
   // Initialize auth client ketika component mount
@@ -65,6 +69,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         const identity = client.getIdentity();
         setIdentity(identity);
         setPrincipal(identity.getPrincipal().toString());
+        
+        // Create authenticated backend actor
+        try {
+          const actor = await createAuthenticatedBackend(identity);
+          setBackendActor(actor);
+        } catch (error) {
+          console.error('Failed to create backend actor:', error);
+        }
       }
     } catch (error) {
       console.error('Error initializing auth:', error);
@@ -101,6 +113,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setPrincipal(identity.getPrincipal().toString());
       setIsAuthenticated(true);
       
+      // Create authenticated backend actor
+      try {
+        const actor = await createAuthenticatedBackend(identity);
+        setBackendActor(actor);
+      } catch (error) {
+        console.error('Failed to create backend actor:', error);
+      }
+      
       console.log('Login successful, Principal:', identity.getPrincipal().toString());
     } catch (error) {
       console.error('Login failed:', error);
@@ -128,6 +148,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setIsAuthenticated(false);
       setIdentity(null);
       setPrincipal(null);
+      setBackendActor(null);
+      clearBackendActor(); // Clear the backend actor instance
       
       console.log('Logout successful');
     } catch (error) {
@@ -144,6 +166,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     identity,
     principal,
     authClient,
+    backendActor,
     login,
     logout,
     loading,
