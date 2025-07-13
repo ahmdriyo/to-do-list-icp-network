@@ -1,0 +1,23 @@
+type Task = 
+ record {
+   comments: vec text;
+   completed: bool;
+   createdAt: int;
+   description: text;
+   id: nat;
+   owner: principal;
+   title: text;
+ };
+service : {
+  addComment: (nat, text) -> (bool);
+  addTask: (text, text) -> (nat);
+  clearCompletedTasks: () -> (nat);
+  deleteTask: (nat) -> (bool);
+  getComments: (nat) -> (vec text) query;
+  getTaskById: (nat) -> (opt Task) query;
+  getTaskCount: () -> (nat) query;
+  getTasks: () -> (vec Task) query;
+  getTasksByStatus: (bool) -> (vec Task) query;
+  toggleStatus: (nat) -> (bool);
+  whoAmI: () -> (principal) query;
+}
