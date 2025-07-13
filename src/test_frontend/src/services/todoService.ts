@@ -3,7 +3,7 @@ import { AuthClient } from '@dfinity/auth-client';
 import { HttpAgent } from '@dfinity/agent';
 import { Identity } from '@dfinity/agent';
 
-// Interface untuk struktur data Task sesuai dengan backend Motoko (dengan owner dan comments)
+// Interface untuk struktur data Task sesuai dengan backend Motoko
 export interface Task {
   id: bigint;
   title: string;
@@ -11,7 +11,6 @@ export interface Task {
   completed: boolean;
   createdAt: bigint;
   owner: string; // Principal sebagai string
-  comments: string[];
 }
 
 // Interface untuk form input
@@ -20,17 +19,10 @@ export interface TaskInput {
   description: string;
 }
 
-// Interface untuk comment input
-export interface CommentInput {
-  taskId: bigint;
-  comment: string;
-}
-
 // Interface untuk validasi error
 export interface ValidationErrors {
   title?: string;
   description?: string;
-  comment?: string;
 }
 
 // Interface untuk loading states
@@ -39,8 +31,6 @@ export interface LoadingStates {
   loading: boolean;
   toggling: Set<string>;
   deleting: Set<string>;
-  commenting: Set<string>;
-  addingComment: Set<string>;
 }
 
 /**
@@ -91,17 +81,4 @@ export const validateTaskInput = (input: TaskInput): ValidationErrors => {
   }
   
   return errors;
-};
-
-/**
- * Helper function untuk validasi comment
- */
-export const validateComment = (comment: string): string | null => {
-  if (!comment.trim()) {
-    return 'Komentar tidak boleh kosong';
-  }
-  if (comment.trim().length > 200) {
-    return 'Komentar maksimal 200 karakter';
-  }
-  return null;
 };

@@ -3,6 +3,7 @@ import Map "mo:base/HashMap";
 import Iter "mo:base/Iter";
 import Text "mo:base/Text";
 import Nat "mo:base/Nat";
+import Principal "mo:base/Principal";
 
 actor TodoBackend {
   
@@ -13,34 +14,35 @@ actor TodoBackend {
     description: Text;
     completed: Bool;
     createdAt: Int;
+    owner: Principal; // Menambahkan owner untuk setiap task
   };
 
   // Stable variable untuk menyimpan data tasks agar bisa diupgrade
   private stable var nextTaskId: Nat = 1;
-  private stable var tasksEntries: [(Nat, Task)] = [];
+  private stable var tasksEntries: [(Text, Task)] = []; // Mengubah format untuk menyimpan dengan key yang tepat
   
-  // HashMap menggunakan Text key untuk menghindari masalah hash
+  // HashMap menggunakan composite key: "principal_taskId" untuk isolasi user
   private var tasks = Map.HashMap<Text, Task>(10, Text.equal, Text.hash);
 
-  // Helper function untuk convert Nat ke Text key
-  private func natToKey(n: Nat): Text { Nat.toText(n) };
+  // Helper function untuk membuat composite key: "principal_taskId"
+  private func makeTaskKey(owner: Principal, taskId: Nat): Text { 
+    Principal.toText(owner) # "_" # Nat.toText(taskId) 
+  };
+
+  // Helper function untuk membuat user prefix untuk filter tasks
+  private func makeUserPrefix(owner: Principal): Text {
+    Principal.toText(owner) # "_"
+  };
 
   // System function untuk memuat data saat upgrade
   system func preupgrade() {
-    tasksEntries := Iter.toArray(
-      Iter.map<(Text, Task), (Nat, Task)>(
-        tasks.entries(),
-        func((key, task): (Text, Task)): (Nat, Task) {
-          (task.id, task)
-        }
-      )
-    );
+    tasksEntries := Iter.toArray(tasks.entries());
   };
 
   system func postupgrade() {
     tasks := Map.HashMap<Text, Task>(10, Text.equal, Text.hash);
-    for ((id, task) in tasksEntries.vals()) {
-      tasks.put(natToKey(id), task);
+    for ((key, task) in tasksEntries.vals()) {
+      tasks.put(key, task);
     };
     tasksEntries := [];
   };
@@ -51,7 +53,8 @@ actor TodoBackend {
    * @param description - Deskripsi tugas
    * @return ID tugas yang baru dibuat
    */
-  public func addTask(title: Text, description: Text) : async Nat {
+  public shared(msg) func addTask(title: Text, description: Text) : async Nat {
+    let caller = msg.caller;
     let taskId = nextTaskId;
     let newTask: Task = {
       id = taskId;
@@ -59,39 +62,53 @@ actor TodoBackend {
       description = description;
       completed = false;
       createdAt = Time.now();
+      owner = caller;
     };
     
-    tasks.put(natToKey(taskId), newTask);
+    let taskKey = makeTaskKey(caller, taskId);
+    tasks.put(taskKey, newTask);
     nextTaskId += 1;
     
     taskId
   };
 
   /**
-   * Mengambil semua daftar tugas
-   * @return Array berisi semua tugas
+   * Mengambil semua daftar tugas milik caller
+   * @return Array berisi semua tugas milik caller
    */
-  public query func getTasks() : async [Task] {
-    Iter.toArray(tasks.vals())
+  public shared query(msg) func getTasks() : async [Task] {
+    let caller = msg.caller;
+    let userPrefix = makeUserPrefix(caller);
+    
+    let userTasks = Iter.filter<(Text, Task)>(tasks.entries(), func((key, task): (Text, Task)) : Bool {
+      Text.startsWith(key, #text userPrefix)
+    });
+    
+    Iter.toArray(Iter.map<(Text, Task), Task>(userTasks, func((_, task): (Text, Task)) : Task { task }))
   };
 
   /**
-   * Mengambil detail tugas berdasarkan ID
+   * Mengambil detail tugas berdasarkan ID (hanya milik caller)
    * @param id - ID tugas yang dicari
-   * @return Optional Task, null jika tidak ditemukan
+   * @return Optional Task, null jika tidak ditemukan atau bukan milik caller
    */
-  public query func getTaskById(id: Nat) : async ?Task {
-    tasks.get(natToKey(id))
+  public shared query(msg) func getTaskById(id: Nat) : async ?Task {
+    let caller = msg.caller;
+    let taskKey = makeTaskKey(caller, id);
+    tasks.get(taskKey)
   };
 
   /**
-   * Mengubah status tugas (completed/not completed)
+   * Mengubah status tugas (completed/not completed) - hanya milik caller
    * @param id - ID tugas yang akan diubah statusnya
-   * @return Bool - true jika berhasil, false jika tugas tidak ditemukan
+   * @return Bool - true jika berhasil, false jika tugas tidak ditemukan atau bukan milik caller
    */
-  public func toggleStatus(id: Nat) : async Bool {
-    switch (tasks.get(natToKey(id))) {
-      case null { false }; // Tugas tidak ditemukan
+  public shared(msg) func toggleStatus(id: Nat) : async Bool {
+    let caller = msg.caller;
+    let taskKey = makeTaskKey(caller, id);
+    
+    switch (tasks.get(taskKey)) {
+      case null { false }; // Tugas tidak ditemukan atau bukan milik caller
       case (?existingTask) {
         let updatedTask: Task = {
           id = existingTask.id;
@@ -99,51 +116,69 @@ actor TodoBackend {
           description = existingTask.description;
           completed = not existingTask.completed;
           createdAt = existingTask.createdAt;
+          owner = existingTask.owner;
         };
-        tasks.put(natToKey(id), updatedTask);
+        tasks.put(taskKey, updatedTask);
         true
       };
     }
   };
   /**
-   * Menghapus tugas berdasarkan ID
+   * Menghapus tugas berdasarkan ID - hanya milik caller
    * @param id - ID tugas yang akan dihapus
-   * @return Bool - true jika berhasil, false jika tugas tidak ditemukan
+   * @return Bool - true jika berhasil, false jika tugas tidak ditemukan atau bukan milik caller
    */
-  public func deleteTask(id: Nat) : async Bool {
-    switch (tasks.remove(natToKey(id))) {
-      case null { false }; // Tugas tidak ditemukan
+  public shared(msg) func deleteTask(id: Nat) : async Bool {
+    let caller = msg.caller;
+    let taskKey = makeTaskKey(caller, id);
+    
+    switch (tasks.remove(taskKey)) {
+      case null { false }; // Tugas tidak ditemukan atau bukan milik caller
       case (?_) { true };  // Tugas berhasil dihapus
     }
   };
 
   /**
-   * Mengambil jumlah total tugas
-   * @return Jumlah tugas yang ada
+   * Mengambil jumlah total tugas milik caller
+   * @return Jumlah tugas yang dimiliki caller
    */
-  public query func getTaskCount() : async Nat {
-    tasks.size()
-  };
-
-  /**
-   * Mengambil tugas berdasarkan status completed
-   * @param completed - Status yang dicari (true/false)
-   * @return Array tugas dengan status yang sesuai
-   */
-  public query func getTasksByStatus(completed: Bool) : async [Task] {
-    let filteredTasks = Iter.filter<Task>(tasks.vals(), func(task: Task) : Bool {
-      task.completed == completed
+  public shared query(msg) func getTaskCount() : async Nat {
+    let caller = msg.caller;
+    let userPrefix = makeUserPrefix(caller);
+    
+    let userTasks = Iter.filter<(Text, Task)>(tasks.entries(), func((key, task): (Text, Task)) : Bool {
+      Text.startsWith(key, #text userPrefix)
     });
-    Iter.toArray(filteredTasks)
+    
+    Iter.size(userTasks)
   };
 
   /**
-   * Menghapus semua tugas yang sudah completed
+   * Mengambil tugas berdasarkan status completed - hanya milik caller
+   * @param completed - Status yang dicari (true/false)
+   * @return Array tugas milik caller dengan status yang sesuai
+   */
+  public shared query(msg) func getTasksByStatus(completed: Bool) : async [Task] {
+    let caller = msg.caller;
+    let userPrefix = makeUserPrefix(caller);
+    
+    let filteredTasks = Iter.filter<(Text, Task)>(tasks.entries(), func((key, task): (Text, Task)) : Bool {
+      Text.startsWith(key, #text userPrefix) and task.completed == completed
+    });
+    
+    Iter.toArray(Iter.map<(Text, Task), Task>(filteredTasks, func((_, task): (Text, Task)) : Task { task }))
+  };
+
+  /**
+   * Menghapus semua tugas yang sudah completed - hanya milik caller
    * @return Jumlah tugas yang dihapus
    */
-  public func clearCompletedTasks() : async Nat {
+  public shared(msg) func clearCompletedTasks() : async Nat {
+    let caller = msg.caller;
+    let userPrefix = makeUserPrefix(caller);
+    
     let completedTasks = Iter.filter<(Text, Task)>(tasks.entries(), func((key, task): (Text, Task)) : Bool {
-      task.completed
+      Text.startsWith(key, #text userPrefix) and task.completed
     });
     
     var deletedCount: Nat = 0;
@@ -153,5 +188,13 @@ actor TodoBackend {
     };
     
     deletedCount
+  };
+
+  /**
+   * Mengambil principal ID caller untuk debugging
+   * @return Principal ID caller
+   */
+  public shared query(msg) func getMyPrincipal() : async Principal {
+    msg.caller
   };
 };
